@@ -111,6 +111,20 @@ function byId<T extends HTMLElement>(id: string): T {
   return el as T;
 }
 
+// ---------- temporary geolocation diagnostics ----------
+// Logs geolocation/permission events to the console, enabled only in the
+// Vite dev build so it stays quiet for real users in production. Lets us see
+// what Android actually reports back from getCurrentPosition. Remove once the
+// Android detection issue is understood.
+const DEBUG = import.meta.env.DEV;
+const dbgStart = Date.now();
+
+function dbg(msg: string): void {
+  if (!DEBUG) return;
+  const t = ((Date.now() - dbgStart) / 1000).toFixed(2);
+  console.log(`[geo] +${t}s  ${msg}`);
+}
+
 // ---------- theme ----------
 // VITE_THEME=new switches to the newer brand color; default/unset uses the legacy one.
 if (import.meta.env.VITE_THEME === 'new') {
@@ -174,6 +188,9 @@ let currentDest: DestScreen | null = null;
 let currentSector: SectorNumber | null = null;
 
 function applyScreen(name: ScreenName): void {
+  // Built lazily so the landing experience is just the loading state — the
+  // grid is only constructed the first time the manual screen is shown.
+  if (name === 'manual') buildGrid();
   (Object.keys(screens) as ScreenName[]).forEach((k) => {
     screens[k].classList.toggle('is-active', k === name);
   });
@@ -289,72 +306,132 @@ function inBucharest(data: NominatimResponse): boolean {
   return /bucure[sş]ti|bucharest/.test(blob);
 }
 
+// Geolocation timeouts. The `timeout` option also counts the time the
+// permission prompt is on screen, so racing it with a short deadline makes
+// slow tappers hit a spurious TIMEOUT (code 3) before they can grant. Use a
+// generous window while a prompt may still be showing, and a tight one once
+// permission is already granted (no dialog, so a long hang means a real GPS
+// failure worth surfacing quickly).
+const GEO_TIMEOUT_PROMPT_MS = 30000;
+const GEO_TIMEOUT_GRANTED_MS = 12000;
+// TIMEOUT / POSITION_UNAVAILABLE are transient (slow fix), so retry a few
+// times before giving up; PERMISSION_DENIED is final and never retried.
+const GEO_MAX_RETRIES = 2;
+
+function geoPermissionState(): Promise<PermissionState | null> {
+  if (!('permissions' in navigator)) return Promise.resolve(null);
+  return navigator.permissions
+    .query({ name: 'geolocation' })
+    .then((s) => s.state)
+    .catch(() => null);
+}
+
+function onGeoSuccess(pos: GeolocationPosition): void {
+  dbg(
+    `success: lat=${pos.coords.latitude.toFixed(5)} lon=${pos.coords.longitude.toFixed(5)} acc=${Math.round(pos.coords.accuracy)}m`,
+  );
+  geoGranted = true;
+  updateGeoWarning(false);
+  const lat = pos.coords.latitude;
+  const lon = pos.coords.longitude;
+  const url =
+    'https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=19&addressdetails=1&accept-language=ro&lat=' +
+    lat +
+    '&lon=' +
+    lon;
+  fetch(url, { headers: { Accept: 'application/json' } })
+    .then((r) => {
+      if (!r.ok) throw new Error('geocode');
+      return r.json() as Promise<NominatimResponse>;
+    })
+    .then((data) => {
+      const n = parseSector(data);
+      if (n) {
+        renderResult(n);
+        return;
+      }
+      if (!inBucharest(data)) {
+        detectError(
+          'Se pare că nu ești în București. Această aplicație acoperă doar sectoarele Bucureștiului.',
+        );
+      } else {
+        detectError(
+          'Nu am putut determina sectorul exact. Alege-l manual mai jos.',
+        );
+      }
+    })
+    .catch(() => {
+      detectError(
+        'Nu am putut verifica locația. Verifică conexiunea sau alege sectorul manual.',
+      );
+    });
+}
+
+function onGeoError(err: GeolocationPositionError, attempt: number): void {
+  dbg(`error: code=${err && err.code} message=${err && err.message}`);
+  if (err && err.code === 1) {
+    // PERMISSION_DENIED — final, don't retry.
+    geoGranted = false;
+    updateGeoWarning(true);
+    navigate('manual');
+    return;
+  }
+  if (attempt < GEO_MAX_RETRIES) {
+    dbg(`retrying geolocation (attempt ${attempt + 1}/${GEO_MAX_RETRIES})`);
+    requestPosition(attempt + 1);
+    return;
+  }
+  detectError('Nu am reușit să obțin locația. Alege sectorul manual.');
+}
+
+function requestPosition(attempt: number): void {
+  geoPermissionState().then((state) => {
+    const timeout =
+      state === 'granted' ? GEO_TIMEOUT_GRANTED_MS : GEO_TIMEOUT_PROMPT_MS;
+    dbg(
+      `getCurrentPosition: start (attempt=${attempt}, perm=${state ?? 'unknown'}, timeout=${timeout}ms)`,
+    );
+    navigator.geolocation.getCurrentPosition(
+      onGeoSuccess,
+      (err) => onGeoError(err, attempt),
+      { enableHighAccuracy: true, timeout, maximumAge: 60000 },
+    );
+  });
+}
+
 function detect(force = false): void {
+  dbg(`detect(force=${force}) called`);
   if (!force) {
     const cached = readSectorCache();
     if (cached) {
+      dbg(`using cached sector ${cached}, skipping geolocation`);
       renderResult(cached, false);
       return;
     }
   }
   if (!('geolocation' in navigator)) {
+    dbg('no geolocation API → manual');
     navigate('manual');
     return;
   }
   detecting();
-  navigator.geolocation.getCurrentPosition(
-    (pos) => {
-      const lat = pos.coords.latitude;
-      const lon = pos.coords.longitude;
-      const url =
-        'https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=19&addressdetails=1&accept-language=ro&lat=' +
-        lat +
-        '&lon=' +
-        lon;
-      fetch(url, { headers: { Accept: 'application/json' } })
-        .then((r) => {
-          if (!r.ok) throw new Error('geocode');
-          return r.json() as Promise<NominatimResponse>;
-        })
-        .then((data) => {
-          const n = parseSector(data);
-          if (n) {
-            renderResult(n);
-            return;
-          }
-          if (!inBucharest(data)) {
-            detectError(
-              'Se pare că nu ești în București. Această aplicație acoperă doar sectoarele Bucureștiului.',
-            );
-          } else {
-            detectError(
-              'Nu am putut determina sectorul exact. Alege-l manual mai jos.',
-            );
-          }
-        })
-        .catch(() => {
-          detectError(
-            'Nu am putut verifica locația. Verifică conexiunea sau alege sectorul manual.',
-          );
-        });
-    },
-    (err) => {
-      if (err && err.code === 1) {
-        navigate('manual');
-        return;
-      }
-      detectError('Nu am reușit să obțin locația. Alege sectorul manual.');
-    },
-    { enableHighAccuracy: true, timeout: 12000, maximumAge: 60000 },
-  );
+  requestPosition(0);
 }
 
 // ---------- geolocation permission state ----------
+// A confirmed successful location fix outranks any "denied" report. iOS
+// Safari's Permissions API can report geolocation as "denied" even right
+// after the user granted access and we read their position; without this
+// guard that false "denied" would grey out the detect button. A genuine
+// PERMISSION_DENIED error (code 1) clears this again.
+let geoGranted = false;
+
 function updateGeoWarning(denied: boolean): void {
-  byId<HTMLButtonElement>('detectAgainBtn').disabled = denied;
-  byId('geoWarn').hidden = !denied;
-  byId<HTMLElement>('geoTip').tabIndex = denied ? 0 : -1;
-  if (!denied) setGeoTipOpen(false);
+  const blocked = denied && !geoGranted;
+  byId<HTMLButtonElement>('detectAgainBtn').disabled = blocked;
+  byId('geoWarn').hidden = !blocked;
+  byId<HTMLElement>('geoTip').tabIndex = blocked ? 0 : -1;
+  if (!blocked) setGeoTipOpen(false);
 }
 
 function watchGeoPermission(): void {
@@ -362,16 +439,26 @@ function watchGeoPermission(): void {
   navigator.permissions
     .query({ name: 'geolocation' })
     .then((status) => {
+      dbg(`permissions.query: ${status.state}`);
       updateGeoWarning(status.state === 'denied');
-      status.addEventListener('change', () =>
-        updateGeoWarning(status.state === 'denied'),
-      );
+      status.addEventListener('change', () => {
+        dbg(`permissions change: ${status.state}`);
+        // An explicit transition to "denied" is a real revoke, so trust it.
+        if (status.state === 'denied') geoGranted = false;
+        updateGeoWarning(status.state === 'denied');
+      });
     })
-    .catch(() => {});
+    .catch((e) => {
+      dbg(`permissions.query failed: ${e}`);
+    });
 }
 
 // ---------- manual picker ----------
+let gridBuilt = false;
+
 function buildGrid(): void {
+  if (gridBuilt) return;
+  gridBuilt = true;
   const grid = byId<HTMLElement>('grid');
   const frag = document.createDocumentFragment();
   SECTOR_NUMBERS.forEach((n) => {
@@ -427,6 +514,5 @@ byId('errManual').addEventListener('click', () => navigate('manual'));
 byId('changeBtn').addEventListener('click', () => navigate('manual'));
 byId('detectAgainBtn').addEventListener('click', () => detect(true));
 
-buildGrid();
 watchGeoPermission();
 detect();
