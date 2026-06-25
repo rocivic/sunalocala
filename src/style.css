@@ -4,8 +4,12 @@
   --line:#E4E7EE;
   --surface:#FBFBFD;
   --panel:#FFFFFF;
-  --civic:#1B2A6B;        /* institutional deep blue */
-  --civic-press:#13205A;
+  --civic-legacy:#1B2A6B;        /* institutional deep blue (previous brand color) */
+  --civic-legacy-press:#13205A;
+  --civic-new:#0089C9;
+  --civic-new-press:#006C9F;
+  --civic:var(--civic-legacy);
+  --civic-press:var(--civic-legacy-press);
   --danger:#DC2626;       /* reserved ONLY for 112 */
   --radius:18px;
   --s1:#B4490B; --s2:#0B7A53; --s3:#1E47C9;
