@@ -306,14 +306,6 @@ function inBucharest(data: NominatimResponse): boolean {
   return /bucure[sş]ti|bucharest/.test(blob);
 }
 
-// Geolocation timeouts. The `timeout` option also counts the time the
-// permission prompt is on screen, so racing it with a short deadline makes
-// slow tappers hit a spurious TIMEOUT (code 3) before they can grant. Use a
-// generous window while a prompt may still be showing, and a tight one once
-// permission is already granted (no dialog, so a long hang means a real GPS
-// failure worth surfacing quickly).
-const GEO_TIMEOUT_PROMPT_MS = 30000;
-const GEO_TIMEOUT_GRANTED_MS = 12000;
 // TIMEOUT / POSITION_UNAVAILABLE are transient (slow fix), so retry a few
 // times before giving up; PERMISSION_DENIED is final and never retried.
 const GEO_MAX_RETRIES = 2;
@@ -322,7 +314,6 @@ function onGeoSuccess(pos: GeolocationPosition): void {
   dbg(
     `success: lat=${pos.coords.latitude.toFixed(5)} lon=${pos.coords.longitude.toFixed(5)} acc=${Math.round(pos.coords.accuracy)}m`,
   );
-  geoGranted = true;
   updateGeoWarning(false);
   const lat = pos.coords.latitude;
   const lon = pos.coords.longitude;
@@ -363,7 +354,6 @@ function onGeoError(err: GeolocationPositionError, attempt: number): void {
   dbg(`error: code=${err && err.code} message=${err && err.message}`);
   if (err && err.code === 1) {
     // PERMISSION_DENIED — final, don't retry.
-    geoGranted = false;
     updateGeoWarning(true);
     navigate('manual');
     return;
@@ -381,15 +371,11 @@ function requestPosition(attempt: number): void {
   // permission prompt that isn't initiated in the page-load task, so we must
   // not defer it behind a promise. The timeout is chosen from the permission
   // state cached by watchGeoPermission instead of an awaited query.
-  const timeout =
-    permState === 'granted' ? GEO_TIMEOUT_GRANTED_MS : GEO_TIMEOUT_PROMPT_MS;
-  dbg(
-    `getCurrentPosition: start (attempt=${attempt}, perm=${permState ?? 'unknown'}, timeout=${timeout}ms)`,
-  );
+  dbg(`getCurrentPosition: start (attempt=${attempt}))`);
   navigator.geolocation.getCurrentPosition(
     onGeoSuccess,
     (err) => onGeoError(err, attempt),
-    { enableHighAccuracy: true, timeout, maximumAge: 60000 },
+    { enableHighAccuracy: true, timeout: 30000, maximumAge: 60000 },
   );
 }
 
@@ -412,45 +398,39 @@ function detect(force = false): void {
   requestPosition(0);
 }
 
-// ---------- geolocation permission state ----------
-// A confirmed successful location fix outranks any "denied" report. iOS
-// Safari's Permissions API can report geolocation as "denied" even right
-// after the user granted access and we read their position; without this
-// guard that false "denied" would grey out the detect button. A genuine
-// PERMISSION_DENIED error (code 1) clears this again.
-let geoGranted = false;
-
-// Last-known geolocation permission state, kept current by watchGeoPermission
-// so requestPosition can pick its timeout synchronously (no awaited query
-// before getCurrentPosition). Null until the first query resolves.
-let permState: PermissionState | null = null;
-
 function updateGeoWarning(denied: boolean): void {
-  const blocked = denied && !geoGranted;
+  const blocked = denied;
   byId<HTMLButtonElement>('detectAgainBtn').disabled = blocked;
   byId('geoWarn').hidden = !blocked;
   byId<HTMLElement>('geoTip').tabIndex = blocked ? 0 : -1;
   if (!blocked) setGeoTipOpen(false);
 }
 
-function watchGeoPermission(): void {
-  if (!('permissions' in navigator)) return;
+// Decides the landing screen and keeps geolocation permission state current.
+// querying the Permissions API reports the state (granted/denied/prompt)
+// *without* prompting, so a returning visitor who already allowed location
+// jumps straight to auto-detection, while everyone else lands on the manual
+// picker and opts in via the "Detectează sectorul" button. Falls back to the
+// manual picker when the Permissions API is unavailable (e.g. older Safari).
+function start(): void {
+  if (!('permissions' in navigator) || !('geolocation' in navigator)) {
+    navigate('manual');
+    return;
+  }
   navigator.permissions
     .query({ name: 'geolocation' })
     .then((status) => {
       dbg(`permissions.query: ${status.state}`);
-      permState = status.state;
       updateGeoWarning(status.state === 'denied');
-      status.addEventListener('change', () => {
-        dbg(`permissions change: ${status.state}`);
-        permState = status.state;
-        // An explicit transition to "denied" is a real revoke, so trust it.
-        if (status.state === 'denied') geoGranted = false;
-        updateGeoWarning(status.state === 'denied');
-      });
+      if (status.state === 'granted') {
+        detect();
+      } else {
+        navigate('manual');
+      }
     })
     .catch((e) => {
       dbg(`permissions.query failed: ${e}`);
+      navigate('manual');
     });
 }
 
@@ -515,5 +495,4 @@ byId('errManual').addEventListener('click', () => navigate('manual'));
 byId('changeBtn').addEventListener('click', () => navigate('manual'));
 byId('detectAgainBtn').addEventListener('click', () => detect(true));
 
-watchGeoPermission();
-detect();
+start();
