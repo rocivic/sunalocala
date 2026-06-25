@@ -50,30 +50,15 @@
           <p class="ghost-num" id="ghostNum" aria-hidden="true">3</p>
           <p class="r-eyebrow">Poliția Locală</p>
           <h2 class="r-sector" id="rSector">Sectorul 3</h2>
-          <a class="r-callbtn" id="callLink" href="tel:0219543">
-            <span class="num" id="rNum">021 9543</span>
-            <span class="ring" aria-hidden="true">
-              <svg
-                width="22"
-                height="22"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="#fff"
-                stroke-width="2.2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              >
-                <path
-                  d="M13.832 16.568a1 1 0 0 0 1.213-.303l.355-.465A2 2 0 0 1 17 15h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2A18 18 0 0 1 2 4a2 2 0 0 1 2-2h3a2 2 0 0 1 2 2v3a2 2 0 0 1-.8 1.6l-.468.351a1 1 0 0 0-.292 1.233 14 14 0 0 0 6.392 6.384"
-                />
-              </svg>
-            </span>
-          </a>
-          <p class="r-alt" id="rAlt" hidden></p>
+          <div class="r-contacts" id="rContacts"></div>
         </div>
         <div class="r-foot">
-          <div class="r-112">
-            <span>Urgență reală? Contactează</span> <a href="tel:112">112</a>
+          <div class="note112">
+            <span class="dot" aria-hidden="true"></span>
+            <span
+              >Urgență cu pericol imediat? Contactează
+              <a href="tel:112">112</a></span
+            >
           </div>
           <button class="btn-change" id="changeBtn">Schimbă sectorul</button>
         </div>
@@ -83,30 +68,57 @@
       <section id="manual" class="screen" aria-label="Alege sectorul">
         <div class="m-head">
           <h2 class="m-title">Alege sectorul</h2>
-          <p class="m-sub">Atinge sectorul în care te afli.</p>
         </div>
         <div class="grid" id="grid"></div>
-        <p class="geo-warn" id="geoWarn" hidden>
-          Nu ai permis încă accesul la locație. Îl poți activa din setările
-          browserului.
-        </p>
-        <button class="btn-primary" id="detectAgainBtn">
-          <svg
-            width="20"
-            height="20"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2.2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
+        <div class="note112">
+          <span class="dot" aria-hidden="true"></span>
+          <span
+            >Urgență cu pericol imediat? Contactează
+            <a href="tel:112">112</a></span
           >
-            <path d="M12 21s-7-6.2-7-11a7 7 0 1 1 14 0c0 4.8-7 11-7 11Z" />
-            <circle cx="12" cy="10" r="2.6" />
-          </svg>
-          Detectează sectorul
-        </button>
+        </div>
+        <div class="geo-tip" id="geoTip">
+          <button
+            class="btn-primary"
+            id="detectAgainBtn"
+            aria-describedby="geoWarn"
+          >
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path d="M12 21s-7-6.2-7-11a7 7 0 1 1 14 0c0 4.8-7 11-7 11Z" />
+              <circle cx="12" cy="10" r="2.6" />
+            </svg>
+            Detectează sectorul
+          </button>
+          <span class="geo-warn" id="geoWarn" role="tooltip" hidden>
+            Nu ai permis încă accesul la locație. Îl poți activa din setările
+            browserului.
+          </span>
+        </div>
       </section>
+
+      <footer class="osm-attrib">
+        <p class="disclaimer">
+          Acest site nu este un portal oficial și nu este afiliat cu nicio
+          instituție publică.
+        </p>
+        ©
+        <a
+          href="https://www.openstreetmap.org/copyright"
+          target="_blank"
+          rel="noopener"
+          >OpenStreetMap</a
+        >
+        contributors
+      </footer>
     </main>
     <script type="module" src="/src/main.ts"></script>
   </body>

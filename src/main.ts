@@ -1,4 +1,11 @@
-import { SECTORS, SECTOR_NUMBERS, type SectorNumber } from './sectors';
+import {
+  SECTORS,
+  SECTOR_NUMBERS,
+  primaryPhone,
+  type Contact,
+  type ContactType,
+  type SectorNumber,
+} from './sectors';
 
 interface NominatimAddress {
   city_district?: string;
@@ -19,6 +26,82 @@ interface NominatimResponse {
 
 function tel(s: string): string {
   return 'tel:' + s.replace(/\s+/g, '');
+}
+
+// ---------- contact rendering ----------
+const CONTACT_LABELS: Record<ContactType, string> = {
+  phone: 'Telefon',
+  whatsapp: 'WhatsApp',
+  facebook: 'Facebook',
+  email: 'Email',
+};
+
+// Inline outline icons (24x24 viewBox), one per contact type, drawn into the
+// accent-colored ring of each contact card.
+const CONTACT_ICON_PATHS: Record<ContactType, string> = {
+  phone:
+    '<path d="M13.832 16.568a1 1 0 0 0 1.213-.303l.355-.465A2 2 0 0 1 17 15h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2A18 18 0 0 1 2 4a2 2 0 0 1 2-2h3a2 2 0 0 1 2 2v3a2 2 0 0 1-.8 1.6l-.468.351a1 1 0 0 0-.292 1.233 14 14 0 0 0 6.392 6.384"/>',
+  whatsapp:
+    '<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>',
+  facebook:
+    '<path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"/>',
+  email:
+    '<rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>',
+};
+
+function contactIconSvg(type: ContactType): string {
+  return (
+    '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">' +
+    CONTACT_ICON_PATHS[type] +
+    '</svg>'
+  );
+}
+
+function contactHref(c: Contact): string {
+  switch (c.type) {
+    case 'phone':
+      return tel(c.value);
+    case 'whatsapp': {
+      // wa.me needs an international number; `value` is stored in local
+      // Romanian format (leading 0), so swap it for the +40 country code.
+      const digits = c.value.replace(/\D/g, '').replace(/^0/, '40');
+      return (
+        'https://wa.me/' +
+        digits +
+        (c.message ? '?text=' + encodeURIComponent(c.message) : '')
+      );
+    }
+    case 'facebook':
+      return c.value;
+    case 'email':
+      return 'mailto:' + c.value;
+  }
+}
+
+function renderContacts(contacts: Contact[], container: HTMLElement): void {
+  container.innerHTML = '';
+  contacts.forEach((c, i) => {
+    const a = document.createElement('a');
+    a.className = 'r-contact' + (i === 0 ? ' r-contact--primary' : ' r-contact--secondary');
+    a.href = contactHref(c);
+    if (c.type === 'facebook') {
+      a.target = '_blank';
+      a.rel = 'noopener';
+    }
+    a.innerHTML =
+      '<span class="r-contact-text">' +
+      '<span class="r-contact-label">' +
+      (c.label ?? CONTACT_LABELS[c.type]) +
+      '</span>' +
+      '<span class="r-contact-value">' +
+      c.value +
+      '</span>' +
+      '</span>' +
+      '<span class="ring" aria-hidden="true">' +
+      contactIconSvg(c.type) +
+      '</span>';
+    container.appendChild(a);
+  });
 }
 
 function byId<T extends HTMLElement>(id: string): T {
@@ -143,18 +226,7 @@ function renderResultContent(n: SectorNumber): void {
   card.style.setProperty('--accent', s.accent);
   byId('ghostNum').textContent = String(n);
   byId('rSector').textContent = 'Sectorul ' + n;
-  byId('rNum').textContent = s.num;
-  byId<HTMLAnchorElement>('callLink').setAttribute('href', tel(s.num));
-
-  const alt = byId<HTMLElement>('rAlt');
-  if (s.alt) {
-    alt.hidden = false;
-    alt.innerHTML =
-      'Linie alternativă: <a href="' + tel(s.alt) + '">' + s.alt + '</a>';
-  } else {
-    alt.hidden = true;
-    alt.innerHTML = '';
-  }
+  renderContacts(s.contacts, byId<HTMLElement>('rContacts'));
 }
 
 function renderResult(n: SectorNumber, cacheResult = true): void {
@@ -280,6 +352,8 @@ function detect(force = false): void {
 function updateGeoWarning(denied: boolean): void {
   byId<HTMLButtonElement>('detectAgainBtn').disabled = denied;
   byId('geoWarn').hidden = !denied;
+  byId<HTMLElement>('geoTip').tabIndex = denied ? 0 : -1;
+  if (!denied) setGeoTipOpen(false);
 }
 
 function watchGeoPermission(): void {
@@ -301,17 +375,18 @@ function buildGrid(): void {
   const frag = document.createDocumentFragment();
   SECTOR_NUMBERS.forEach((n) => {
     const s = SECTORS[n];
+    const phone = primaryPhone(s) ?? '';
     const b = document.createElement('button');
     b.className = 'sec-btn';
     b.style.setProperty('--accent', s.accent);
-    b.setAttribute('aria-label', 'Sectorul ' + n + ', Poliția Locală ' + s.num);
+    b.setAttribute('aria-label', 'Sectorul ' + n + ', Poliția Locală ' + phone);
     b.innerHTML =
       '<span class="badge" aria-hidden="true">' +
       n +
       '</span><span class="lbl">Sectorul ' +
       n +
       '</span><span class="ph">' +
-      s.num +
+      phone +
       '</span>';
     b.addEventListener('click', () => renderResult(n));
     frag.appendChild(b);
@@ -320,6 +395,32 @@ function buildGrid(): void {
 }
 
 // ---------- wire up ----------
+// Tooltip visibility is driven entirely from JS (not :hover/:focus-within)
+// because a disabled <button> can't reliably receive hover/focus across
+// browsers, and touch devices have no hover at all.
+const geoTip = byId<HTMLElement>('geoTip');
+
+function setGeoTipOpen(open: boolean): void {
+  geoTip.classList.toggle('is-open', open && !byId('geoWarn').hidden);
+}
+
+geoTip.addEventListener('pointerenter', (e) => {
+  if (e.pointerType === 'mouse') setGeoTipOpen(true);
+});
+geoTip.addEventListener('pointerleave', (e) => {
+  if (e.pointerType === 'mouse') setGeoTipOpen(false);
+});
+geoTip.addEventListener('focusin', () => setGeoTipOpen(true));
+geoTip.addEventListener('focusout', () => setGeoTipOpen(false));
+geoTip.addEventListener('pointerup', (e) => {
+  if (e.pointerType === 'touch' || e.pointerType === 'pen') {
+    setGeoTipOpen(!geoTip.classList.contains('is-open'));
+  }
+});
+document.addEventListener('pointerdown', (e) => {
+  if (!geoTip.contains(e.target as Node)) setGeoTipOpen(false);
+});
+
 byId('retryBtn').addEventListener('click', () => detect(true));
 byId('errManual').addEventListener('click', () => navigate('manual'));
 byId('changeBtn').addEventListener('click', () => navigate('manual'));
