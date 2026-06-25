@@ -82,7 +82,8 @@ function renderContacts(contacts: Contact[], container: HTMLElement): void {
   container.innerHTML = '';
   contacts.forEach((c, i) => {
     const a = document.createElement('a');
-    a.className = 'r-contact' + (i === 0 ? ' r-contact--primary' : ' r-contact--secondary');
+    a.className =
+      'r-contact' + (i === 0 ? ' r-contact--primary' : ' r-contact--secondary');
     a.href = contactHref(c);
     if (c.type === 'facebook') {
       a.target = '_blank';
@@ -306,7 +307,7 @@ function detect(force = false): void {
       const lat = pos.coords.latitude;
       const lon = pos.coords.longitude;
       const url =
-        'https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=14&addressdetails=1&accept-language=ro&lat=' +
+        'https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=19&addressdetails=1&accept-language=ro&lat=' +
         lat +
         '&lon=' +
         lon;
