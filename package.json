@@ -1,0 +1,24 @@
+{
+  "name": "sunalocala",
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rocivic/sunalocala.git"
+  },
+  "license": "Apache-2.0",
+  "bugs": {
+    "url": "https://github.com/rocivic/sunalocala/issues"
+  },
+  "homepage": "https://github.com/rocivic/sunalocala#readme",
+  "type": "module",
+  "private": "true",
+  "devDependencies": {
+    "typescript": "^6.0.3",
+    "vite": "^8.1.0"
+  }
+}
