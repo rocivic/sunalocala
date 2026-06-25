@@ -318,14 +318,6 @@ const GEO_TIMEOUT_GRANTED_MS = 12000;
 // times before giving up; PERMISSION_DENIED is final and never retried.
 const GEO_MAX_RETRIES = 2;
 
-function geoPermissionState(): Promise<PermissionState | null> {
-  if (!('permissions' in navigator)) return Promise.resolve(null);
-  return navigator.permissions
-    .query({ name: 'geolocation' })
-    .then((s) => s.state)
-    .catch(() => null);
-}
-
 function onGeoSuccess(pos: GeolocationPosition): void {
   dbg(
     `success: lat=${pos.coords.latitude.toFixed(5)} lon=${pos.coords.longitude.toFixed(5)} acc=${Math.round(pos.coords.accuracy)}m`,
@@ -385,18 +377,20 @@ function onGeoError(err: GeolocationPositionError, attempt: number): void {
 }
 
 function requestPosition(attempt: number): void {
-  geoPermissionState().then((state) => {
-    const timeout =
-      state === 'granted' ? GEO_TIMEOUT_GRANTED_MS : GEO_TIMEOUT_PROMPT_MS;
-    dbg(
-      `getCurrentPosition: start (attempt=${attempt}, perm=${state ?? 'unknown'}, timeout=${timeout}ms)`,
-    );
-    navigator.geolocation.getCurrentPosition(
-      onGeoSuccess,
-      (err) => onGeoError(err, attempt),
-      { enableHighAccuracy: true, timeout, maximumAge: 60000 },
-    );
-  });
+  // Call getCurrentPosition synchronously: Android Chrome auto-denies a
+  // permission prompt that isn't initiated in the page-load task, so we must
+  // not defer it behind a promise. The timeout is chosen from the permission
+  // state cached by watchGeoPermission instead of an awaited query.
+  const timeout =
+    permState === 'granted' ? GEO_TIMEOUT_GRANTED_MS : GEO_TIMEOUT_PROMPT_MS;
+  dbg(
+    `getCurrentPosition: start (attempt=${attempt}, perm=${permState ?? 'unknown'}, timeout=${timeout}ms)`,
+  );
+  navigator.geolocation.getCurrentPosition(
+    onGeoSuccess,
+    (err) => onGeoError(err, attempt),
+    { enableHighAccuracy: true, timeout, maximumAge: 60000 },
+  );
 }
 
 function detect(force = false): void {
@@ -426,6 +420,11 @@ function detect(force = false): void {
 // PERMISSION_DENIED error (code 1) clears this again.
 let geoGranted = false;
 
+// Last-known geolocation permission state, kept current by watchGeoPermission
+// so requestPosition can pick its timeout synchronously (no awaited query
+// before getCurrentPosition). Null until the first query resolves.
+let permState: PermissionState | null = null;
+
 function updateGeoWarning(denied: boolean): void {
   const blocked = denied && !geoGranted;
   byId<HTMLButtonElement>('detectAgainBtn').disabled = blocked;
@@ -440,9 +439,11 @@ function watchGeoPermission(): void {
     .query({ name: 'geolocation' })
     .then((status) => {
       dbg(`permissions.query: ${status.state}`);
+      permState = status.state;
       updateGeoWarning(status.state === 'denied');
       status.addEventListener('change', () => {
         dbg(`permissions change: ${status.state}`);
+        permState = status.state;
         // An explicit transition to "denied" is a real revoke, so trust it.
         if (status.state === 'denied') geoGranted = false;
         updateGeoWarning(status.state === 'denied');
